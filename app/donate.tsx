@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator, // Import ActivityIndicator
   Alert, // Import Alert from React Native
+  TextInput, // Import TextInput for custom amount input
 } from "react-native";
 
 import donateStyles from "@/app/style/dontate-styles";
@@ -19,6 +20,8 @@ import {
 } from "@/providers/stripe/stripeFunctions";
 import { createPaymentIntentClientSecret } from "@/app/utils/helpers";
 
+import { StripeProvider } from "@/providers/stripe/stripe.native";
+///kkkk
 import { useRouter, useNavigation } from "expo-router";
 
 export default function Donate() {
@@ -26,6 +29,11 @@ export default function Donate() {
   const [donationCategory, setDonationCategory] = useState(null);
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false); // Loading state
+
+  //added
+  const isCustomAmount = selectedAmount === "Other";
+  const [customAmount, setCustomAmount] = useState("");
+
 
   const router = useRouter();
 const navigation = useNavigation();
@@ -36,91 +44,94 @@ const navigation = useNavigation();
   }, [navigation]);
 
   async function pay() {
-    console.log("pay: Starting payment process");
-    setIsLoading(true); // Start loading
-
-    const requestBody = {
-      amount: selectedAmount * 100, // Convert amount to cents
-      currency: "cad",
-    };
-
-    try {
-      console.log(
-        "pay: Creating Payment Intent with requestBody:",
-        requestBody
-      );
-      const { customer, clientSecret } = await createPaymentIntentClientSecret(
-        requestBody
-      );
-
-      if (!customer || !clientSecret) {
-        console.log("pay: Failed to get customer or clientSecret");
-        setIsLoading(false); // Stop loading
-        return;
-      }
-
-      console.log("pay: Received customer and clientSecret:", {
-        customer,
-        clientSecret,
-      });
-
-      const paymentSheetConfig = {
-        merchantDisplayName: "Example, Inc.",
-        customerId: customer,
-        paymentIntentClientSecret: clientSecret,
-        allowsDelayedPaymentMethods: true,
-        defaultBillingDetails: {
-          name: "Jane Doe",
-        },
-        returnURL: "your-app-scheme://redirect",
-      };
-
-      console.log(
-        "pay: Initializing Payment Sheet with config:",
-        paymentSheetConfig
-      );
-      const { error: initPaymentSheetError } = await initPaymentSheet(
-        paymentSheetConfig
-      );
-
-      if (initPaymentSheetError) {
-        console.error("pay: initPaymentSheetError:", initPaymentSheetError);
-        Alert.alert(
-          "There was a problem processing the payment",
-          "Please try again later"
-        );
-        setIsLoading(false); // Stop loading
-        return;
-      }
-
-      console.log("pay: Payment Sheet initialized successfully");
-
-      console.log("pay: Presenting Payment Sheet");
-      const { error: presentPaymentSheetError } = await presentPaymentSheet();
-
-      if (presentPaymentSheetError) {
-        console.error(
-          "pay: presentPaymentSheetError:",
-          presentPaymentSheetError
-        );
-        Alert.alert(
-          "There was a problem processing the payment",
-          "Please try again later"
-        );
-        setIsLoading(false); // Stop loading
-        return;
-      }
-
-      console.log(
-        "pay: Payment Sheet presented successfully, navigating to /completion"
-      );
-      router.navigate("completion");
-    } catch (error) {
-      console.error("pay: Unexpected error occurred:", error);
-    } finally {
-      setIsLoading(false); // Stop loading when done
-    }
+  // Validate inputs
+  if (!donationCategory) {
+    Alert.alert("Please select a donation category");
+    return;
   }
+
+  // Determine amount
+  const amountToCharge = selectedAmount === "Other" 
+    ? parseFloat(customAmount) || 0 
+    : selectedAmount;
+
+  if (amountToCharge <= 0) {
+    Alert.alert("Please enter a valid amount");
+    return;
+  }
+
+  setIsLoading(true);
+
+  try {
+    // 1. Create Payment Intent on your backend
+    const { clientSecret, customer } = await createPaymentIntentClientSecret({
+      amount: Math.round(amountToCharge * 100), // in cents
+      currency: 'cad',
+      metadata: {
+        donation_category: donationCategory,
+      },
+    });
+
+    if (!clientSecret) {
+      throw new Error("Failed to create payment intent");
+    }
+
+    // 2. Initialize Payment Sheet
+    const { error: initError } = await initPaymentSheet({
+      paymentIntentClientSecret: clientSecret,
+      merchantDisplayName: "Your Organization",
+      customerId: customer,
+      allowsDelayedPaymentMethods: false, // Set to true if you accept delayed payment methods
+      style: 'alwaysDark', // or 'alwaysLight', 'automatic'
+      appearance: {
+        colors: {
+          primary: '#D4AF37', // Your gold color
+          background: '#ffffff',
+          componentBackground: '#f8f8f8',
+          componentBorder: '#D4AF37',
+        },
+        shapes: {
+          borderRadius: 8,
+          borderWidth: 1,
+        }
+      },
+      defaultBillingDetails: {
+        name: 'Donor', // You could collect this earlier
+      },
+    });
+
+    if (initError) {
+      throw initError;
+    }
+
+    // 3. Present Payment Sheet
+    const { error: paymentError } = await presentPaymentSheet();
+
+    if (paymentError) {
+      // Handle specific error cases
+      if (paymentError.code === 'Canceled') {
+        // User canceled the payment
+        return;
+      }
+      throw paymentError;
+    }
+
+    // 4. Payment succeeded
+    router.navigate('completion', {
+      amount: amountToCharge,
+      category: donationCategory,
+    });
+
+  } catch (error) {
+    console.error('Payment error:', error);
+    Alert.alert(
+      'Payment Error',
+      error.message || 'There was an error processing your payment'
+    );
+  } finally {
+    setIsLoading(false);
+  }
+}
 
   const donationAmounts = [10, 25, 50, 100, 250, "Other"];
   const donationCategories = ["General Fund", "Ramadhan Fund"];
@@ -128,41 +139,14 @@ const navigation = useNavigation();
   return (
     <View style={donateStyles.container}>
       <ScrollView>
+        {/* Header section with Donate title */}
         <View style={donateStyles.sectionHeader}>
           <Text style={donateStyles.title}>Donate</Text>
         </View>
 
+        {/* Main form container */}
         <View style={styles.formContainer}>
-          <Text style={styles.amountTitle}>$ {selectedAmount}</Text>
-          <View style={styles.amountButtonsContainer}>
-            {donationAmounts.map((amount) => (
-              <TouchableOpacity
-                key={amount}
-                style={[
-                  styles.amountButton,
-                  selectedAmount === amount && styles.selectedAmountButton,
-                ]}
-                onPress={() => {
-                  if (amount === "Other") {
-                    // Handle custom amount input here
-                  } else {
-                    setSelectedAmount(amount);
-                  }
-                }}
-              >
-                <Text
-                  style={[
-                    styles.amountButtonText,
-                    selectedAmount === amount &&
-                      styles.selectedAmountButtonText,
-                  ]}
-                >
-                  {typeof amount === "string" ? amount : `$${amount}`}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
+          {/* Donation category dropdown selector */}
           <TouchableOpacity
             style={styles.dropdown}
             onPress={() => setCategoryModalVisible(true)}
@@ -171,16 +155,76 @@ const navigation = useNavigation();
               {donationCategory ? donationCategory : "Select donation Category"}
             </Text>
           </TouchableOpacity>
+          
+          {/* Amount display - shows selected amount or custom amount if "Other" is selected */}
+          <Text style={styles.amountTitle}>
+            $ {selectedAmount === "Other" ? customAmount || "0.00" : selectedAmount}
+          </Text>
+          
+          {/* Container for the amount selection buttons */}
+          <View style={styles.amountButtonsContainer}>
+            {donationAmounts.map((amount) => (
+              <TouchableOpacity
+                key={amount}
+                style={[
+                  styles.amountButton,
+                  // Highlight if this amount is selected or if it's "Other" and custom amount is active
+                  (selectedAmount === amount || 
+                   (amount === "Other" && selectedAmount === "Other")) && 
+                  styles.selectedAmountButton,
+                ]}
+                onPress={() => {
+                  setSelectedAmount(amount);
+                  // Clear custom amount if switching back to preset amount
+                  if (amount !== "Other") {
+                    setCustomAmount("");
+                  }
+                }}
+              >
+                <Text
+                  style={[
+                    styles.amountButtonText,
+                    // Apply selected text style if this amount is selected
+                    (selectedAmount === amount || 
+                     (amount === "Other" && selectedAmount === "Other")) &&
+                    styles.selectedAmountButtonText,
+                  ]}
+                >
+                  {typeof amount === "string" ? amount : `$${amount}`}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-          {/* Show loading indicator when processing payment */}
+          {/* Custom amount input field - only shown when "Other" is selected */}
+          {selectedAmount === "Other" && (
+            <TextInput
+              style={styles.customAmountInput}
+              keyboardType="numeric"
+              placeholder="Enter custom amount"
+              value={customAmount}
+              onChangeText={(text) => {
+                // Input validation - only allow numbers and decimal point
+                const cleanedText = text.replace(/[^0-9.]/g, '');
+                setCustomAmount(cleanedText);
+              }}
+              // Auto-focus the input when it appears
+              autoFocus={true}
+            />
+          )}
+
+          {/* Payment processing indicator or donate button */}
           {isLoading ? (
+            // Show loading spinner during payment processing
             <ActivityIndicator size="large" color="#D4AF37" />
           ) : (
+            // Donate button
             <TouchableOpacity style={styles.payButton} onPress={pay}>
               <Text style={styles.payButtonText}>DONATE</Text>
             </TouchableOpacity>
           )}
 
+          {/* iOS-specific note about ApplePay */}
           {Platform.OS === "ios" && (
             <Text style={styles.note}>
               Please note: ApplePay must be enabled in order to donate.{" "}
@@ -190,6 +234,7 @@ const navigation = useNavigation();
         </View>
       </ScrollView>
 
+      {/* Modal for selecting donation category */}
       <Modal
         transparent={true}
         visible={categoryModalVisible}
@@ -198,6 +243,7 @@ const navigation = useNavigation();
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
+            {/* List of donation categories */}
             <FlatList
               data={donationCategories}
               keyExtractor={(item) => item}
@@ -212,6 +258,7 @@ const navigation = useNavigation();
                 </TouchableOpacity>
               )}
             />
+            {/* Modal close button */}
             <TouchableOpacity onPress={() => setCategoryModalVisible(false)}>
               <Text style={styles.modalCancel}>Cancel</Text>
             </TouchableOpacity>

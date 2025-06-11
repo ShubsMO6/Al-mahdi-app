@@ -1,5 +1,5 @@
 import React from "react";
-import { StripeProvider as CustomStripeProvider } from "./stripe/stripe";
+import { StripeProvider as CustomStripeProvider } from "./stripe/stripe.native";
 
 type StripeProviderProps = {
   children: JSX.Element | JSX.Element[];

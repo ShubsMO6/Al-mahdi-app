@@ -48,14 +48,15 @@ export const getNextFifteenDaysPrayerTimesGPS = (
 export async function createPaymentIntentClientSecret({
   amount,
   currency,
-}: StripePaymentIntentRequestBody): Promise<StripePaymentIntentResponse> {
+  metadata = {},
+}: {
+  amount: number;
+  currency: string;
+  metadata?: Record<string, string>;
+}): Promise<{ clientSecret: string | null; customer: string | null }> {
   try {
     console.log("Starting Payment Intent request...");
-    console.log(
-      "Requesting Payment Intent from:",
-      `${process.env.EXPO_PUBLIC_BACKEND_SERVICE_URL_DEV}stripe-payment-intent`
-    );
-    console.log("Amount:", amount, "Currency:", currency);
+    console.log("Amount:", amount, "Currency:", currency, "Metadata:", metadata);
 
     const response = await fetch(
       `${process.env.EXPO_PUBLIC_BACKEND_SERVICE_URL_DEV}stripe-payment-intent`,
@@ -67,36 +68,35 @@ export async function createPaymentIntentClientSecret({
         body: JSON.stringify({
           amount,
           currency,
+          metadata,
         }),
       }
     );
 
-    // Log the status and response
     console.log("Response status:", response.status);
 
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Server error:", errorText);
+      throw new Error(`Server error: ${response.status}`);
+    }
+
     const data = await response.json();
-    console.log("Response data:", data); // Log the response
+    console.log("Response data:", data);
 
     const { clientSecret, customer } = data;
 
-    // Log the received values
-    console.log("Client Secret:", clientSecret);
-    console.log("Customer:", customer);
-
-    if (!clientSecret || !customer) {
-      const errorMessage = "Could not get clientSecret or customer from Stripe";
+    if (!clientSecret) {
+      const errorMessage = "Could not get clientSecret from Stripe";
       console.error(errorMessage);
       throw new Error(errorMessage);
     }
 
     console.log("Payment Intent successfully created.");
-    return { clientSecret, customer };
+    return { clientSecret, customer: customer || null };
   } catch (error) {
-    console.log("Fetch error:", error);
-    return {
-      clientSecret: null,
-      customer: null,
-    };
+    console.error("Fetch error:", error);
+    throw error; // Re-throw the error instead of returning null values
   }
 }
 

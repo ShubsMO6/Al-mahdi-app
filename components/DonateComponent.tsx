@@ -15,7 +15,7 @@ const DonateComponent = () => {
   const [isPressed, setIsPressed] = useState(false);
 
   const handleDonatePress = () => {
-    Linking.openURL("https://almahdi.breezechms.com/give/online");
+    router.push("/donate");
     console.log("Donate Pressed");
   };
 
